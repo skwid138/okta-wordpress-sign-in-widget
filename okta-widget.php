@@ -274,7 +274,7 @@ class Okta_Sign_In {
 				// We don't need to verify the JWT signature since it came from the HTTP response directly
 				list($jwtHeader, $jwtPayload, $jwtSignature) = explode( '.', $body['id_token']);
 				$claims = json_decode(base64_decode($jwtPayload), true);
-				$this->log_user_into_wordpress_from_email($claims['email']);
+				$this->log_user_into_wordpress_from_email($claims['email'], $claims);
 
 			} else {
 				die("There was an error logging in: {$body['error_description']}");
@@ -313,7 +313,24 @@ class Okta_Sign_In {
 			die("Okta reports that id_token is not active: {$claims['error_description']}");
 		}
 
-		$this->log_user_into_wordpress_from_email($claims['email']);
+		$this->log_user_into_wordpress_from_email($claims['email'], $claims);
+	}
+
+	/**
+	 * Update the user's role when the user is first created in WP
+	 *
+	 * @param int $user_id The User's ID
+	 * @param array $okta_response The parsed JWT
+	 */
+	private function set_wp_user_role($user_id, $okta_response) {
+		// Could one day use the response to set the role, not currently being sent by Okta
+		$user_id = wp_update_user(['ID' => $user_id, 'role' => 'author']);
+
+		if (is_wp_error($user_id)) {
+			// There was an error, probably that user doesn't exist.
+		} else {
+			// Success!
+		}
 	}
 
 	/**
@@ -323,13 +340,17 @@ class Okta_Sign_In {
 	 * @param string $email The user's email address
 	 * @param string $redirect_to The URL a user was on prior to login
 	 */
-	private function log_user_into_wordpress_from_email($email) {
+	private function log_user_into_wordpress_from_email($email, $okta_response) {
 		$user = get_user_by('email', $email);
 
 		// Create a user in WP
 		if (!$user) {
 			$random_password = wp_generate_password($length = 64, $include_standard_special_chars = false);
 			$user_id = wp_create_user($email, $random_password, $email);
+
+			// Update the user's role accordingly
+			$this->set_wp_user_role($user_id, $okta_response);
+
 			$user = get_user_by('id', $user_id);
 		} else {
 			$user_id = $user->ID;
